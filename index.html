@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Карточки</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#0b0a0a;--card:#181415;--line:#2e2527;--red:#d7263d;--red-d:#8f1423;--tx:#f4eeee;--mut:#9a8d8f;--ok:#46c28a}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg)}
+body{color:var(--tx);font:16px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif;padding:16px 16px 48px;padding-top:max(16px,env(safe-area-inset-top));max-width:560px;margin:0 auto;min-height:100vh}
+h1{font:700 30px/1.15 Georgia,"Iowan Old Style",serif;margin:14px 0 18px}
+p{margin:6px 0}
+.mut{color:var(--mut);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--red);border-radius:6px;padding:14px;margin:10px 0;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.card.stack{display:block}
+.click{cursor:pointer}
+.click:active{background:#221b1d}
+input{width:100%;background:#0f0d0d;border:1px solid var(--line);color:var(--tx);border-radius:6px;padding:13px;font:inherit;margin:4px 0}
+input:focus,button:focus-visible{outline:2px solid var(--red);outline-offset:1px}
+button{font:600 16px inherit;font-family:inherit;border:0;border-radius:6px;padding:13px 16px;color:#fff;background:var(--red);cursor:pointer;margin:6px 0}
+button:active{background:var(--red-d)}
+button:disabled{opacity:.35}
+button.big{width:100%;padding:15px}
+button.ghost{background:transparent;color:var(--mut);padding:8px 0;margin:0}
+button.danger{color:var(--red);width:100%;margin-top:24px}
+button.x{background:transparent;color:var(--mut);padding:4px 8px;margin:0}
+.row{display:flex;gap:8px;align-items:center}
+.row button{margin:4px 0;white-space:nowrap}
+.word{font:700 38px/1.15 Georgia,"Iowan Old Style",serif;text-align:center;padding:38px 10px;display:block;border-left-width:3px}
+.ok{border-left-color:var(--ok)}
+.bad{border-left-color:var(--red);background:#1f1114}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+let data = { sets: [] };
+try { data = JSON.parse(localStorage.getItem('cards') || '{"sets":[]}'); } catch (e) {}
+const save = () => { try { localStorage.setItem('cards', JSON.stringify(data)); } catch (e) {} };
+
+const app = document.getElementById('app');
+const h = html => { app.innerHTML = html; window.scrollTo(0, 0); };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm = s => s.trim().toLowerCase();
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const ask = (msg, cb) => tg && tg.showConfirm ? tg.showConfirm(msg, cb) : cb(confirm(msg));
+const $ = id => document.getElementById(id);
+
+function home() {
+  h(`<h1>Мои наборы</h1>
+    <div class="row"><input id="n" placeholder="Название нового набора" maxlength="40"><button onclick="addSet()">Создать</button></div>
+    ${data.sets.map((s, i) => `<div class="card click" onclick="openSet(${i})"><b>${esc(s.name)}</b><span class="mut">слов: ${s.words.length}</span></div>`).join('')
+      || '<p class="mut">Наборов пока нет. Назови первый и нажми «Создать».</p>'}`);
+}
+
+function addSet() {
+  const name = $('n').value.trim();
+  if (!name) return;
+  data.sets.push({ name, words: [] });
+  save();
+  openSet(data.sets.length - 1);
+}
+
+function openSet(i) {
+  const s = data.sets[i];
+  h(`<button class="ghost" onclick="home()">← К наборам</button>
+    <h1>${esc(s.name)}</h1>
+    <div class="card stack">
+      <input id="w" placeholder="Слово" autocomplete="off">
+      <input id="t" placeholder="Перевод" autocomplete="off">
+      <button class="big" onclick="addWord(${i})">Добавить слово</button>
+    </div>
+    <button class="big" onclick="study(${i})" ${s.words.length ? '' : 'disabled'}>Учить набор (${s.words.length})</button>
+    ${s.words.map((p, k) => `<div class="card"><span><b>${esc(p[0])}</b> — ${esc(p[1])}</span><button class="x" aria-label="Удалить слово" onclick="delWord(${i},${k})">✕</button></div>`).join('')}
+    <button class="ghost danger" onclick="delSet(${i})">Удалить набор</button>`);
+}
+
+function addWord(i) {
+  const w = $('w').value.trim(), t = $('t').value.trim();
+  if (!w || !t) return;
+  data.sets[i].words.push([w, t]);
+  save();
+  openSet(i);
+  $('w').focus();
+}
+
+function delWord(i, k) { data.sets[i].words.splice(k, 1); save(); openSet(i); }
+function delSet(i) { ask('Удалить набор вместе со словами?', ok => { if (ok) { data.sets.splice(i, 1); save(); home(); } }); }
+
+let S;
+function study(i) {
+  const words = data.sets[i].words;
+  S = { i, queue: shuffle(words), mist: [], total: words.length, first: 0, round: 1, cur: null };
+  next();
+}
+
+function next() {
+  if (!S.queue.length) {
+    if (S.mist.length) { S.queue = shuffle(S.mist); S.mist = []; S.round++; }
+    else return done();
+  }
+  S.cur = S.queue.pop();
+  h(`<button class="ghost" onclick="openSet(${S.i})">← Выйти</button>
+    <p class="mut">${S.round > 1 ? 'Повтор ошибок, круг ' + S.round + '. ' : ''}Осталось слов: ${S.queue.length + 1}</p>
+    <div class="card word">${esc(S.cur[0])}</div>
+    <input id="a" placeholder="Введи перевод" autocomplete="off" autocapitalize="off">
+    <button class="big" onclick="check()">Проверить</button>`);
+  $('a').focus();
+  $('a').addEventListener('keydown', e => { if (e.key === 'Enter') check(); });
+}
+
+function check() {
+  const ok = norm($('a').value) === norm(S.cur[1]);
+  if (ok) { if (S.round === 1) S.first++; } else S.mist.push(S.cur);
+  h(`<div class="card stack ${ok ? 'ok' : 'bad'}">
+      <div class="mut">${esc(S.cur[0])}</div>
+      <p><b>${ok ? 'Верно!' : 'Неверно. Правильно: ' + esc(S.cur[1])}</b></p>
+    </div>
+    <button class="big" id="go" onclick="next()">Дальше</button>`);
+  $('go').focus();
+}
+
+function done() {
+  h(`<h1>Набор пройден</h1>
+    <div class="card stack"><p>С первого раза: <b>${S.first} из ${S.total}</b></p></div>
+    <button class="big" onclick="study(${S.i})">Пройти ещё раз</button>
+    <button class="ghost" onclick="openSet(${S.i})">← К набору</button>`);
+}
+
+home();
+</script>
+</body>
+</html>
